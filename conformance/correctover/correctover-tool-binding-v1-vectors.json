@@ -1,0 +1,162 @@
+{
+  "suite": "correctover-tool-binding-v1",
+  "spec": "draft-etcheverry-action-ref-05 (preimage four-field + receipt envelope optional fields)",
+  "derivation": "Each anchor is a fixed runtime tool-binding case. Inputs: authorized_tool (tool identity declared at approval time), dispatched_tool (tool identity actually resolved at execution time), action_type (semantic label carried in the preimage), effective_args (dispatched parameters), effective_args_digest (SHA-256 over JCS of effective_args, per the -05 receipt envelope), authority_verified_at_ms / revocation_check_at_ms (freshness-layer optional fields), policy_scope_max (bound ceiling where applicable). Expected verdicts: BINDS = the settlement-time check required by the payments extension (Company verifies the delegated principal equals the operation's approved subject, and the dispatched tool/params equal the approved declaration) passes; REFUSES = it must fail closed with the stated reason class.",
+  "author_set": "Correctover (github.com/DSHCorrectover) — computed with an independent verifier written from draft-etcheverry-action-ref-05 alone, with no reference to the trail, agentavow or agentgraph canonicalizer implementations. verify.py in this directory is that verifier; it is dependency-free and reproduces every verdict below byte-for-byte. A second independently written verifier (verifier-two) is being added under the same corpus; the zero-disagreement requirement is part of the author-set discipline.",
+  "failure_modes": {
+    "fails-open-label": "action_type label matches but dispatched tool identity differs. A relying party that checks only the semantic label sees a match that is not there.",
+    "fails-open-params": "Tool identity matches but dispatched args exceed the approved declaration. The digest verifies against the dispatched args, so integrity alone cannot catch widening — only a comparison against the approved declaration can.",
+    "fails-open-stale": "Tool and params match but authority/revocation timestamps fall outside the policy window at settlement time.",
+    "refuses": "The binding check rejects and produces a reason class; no BINDS verdict is representable through these paths."
+  },
+  "purpose": "Runtime tool-binding cases that a digest-only pipeline cannot decide. The preimage/anchor layer proves the record was not tampered with; this suite proves the tool identity and parameter set behind the record still bind to the approved declaration at settlement time.",
+  "anchors": [
+    {
+      "name": "b3-exact-tool-and-params",
+      "note": "Happy path: dispatched tool equals approved tool, effective_args_digest recomputes from effective_args, freshness fields inside window.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.send",
+      "action_type": "payment.send",
+      "effective_args": {
+        "amount": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "effective_args_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8550",
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763280000000,
+      "revocation_check_at_ms": 1763280000000,
+      "settlement_at_ms": 1763280000500,
+      "policy_scope_max": 100,
+      "expected_verdict": "BINDS",
+      "expected_reason": "tool-identity + params-bound + fresh"
+    },
+    {
+      "name": "b3-tool-substitution-same-prefix",
+      "note": "Semantic label carried in the preimage still says payment.send, but the dispatched tool is payments.refund. A digest-only pipeline passes this case; a binding check must not.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.refund",
+      "action_type": "payment.send",
+      "effective_args": {
+        "amount": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763280000000,
+      "revocation_check_at_ms": 1763280000000,
+      "settlement_at_ms": 1763280000500,
+      "policy_scope_max": 100,
+      "expected_verdict": "REFUSES",
+      "expected_reason": "tool-identity"
+    },
+    {
+      "name": "b3-label-case-variant",
+      "note": "Label differs from the approved action_type only by case. action_type is an exact-match string in the -05 preimage table; no normalization is defined, so fail closed.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.send",
+      "action_type": "Payment.Send",
+      "approved_action_type": "payment.send",
+      "effective_args": {
+        "amount": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763280000000,
+      "revocation_check_at_ms": 1763280000000,
+      "settlement_at_ms": 1763280000500,
+      "policy_scope_max": 100,
+      "expected_verdict": "REFUSES",
+      "expected_reason": "label-integrity"
+    },
+    {
+      "name": "b3-param-widening-amount",
+      "note": "Tool identity matches and the digest is internally consistent, but the dispatched amount exceeds the approved ceiling. Integrity cannot catch this; only comparison against approved_params can.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.send",
+      "action_type": "payment.send",
+      "effective_args": {
+        "amount": 250,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763280000000,
+      "revocation_check_at_ms": 1763280000000,
+      "settlement_at_ms": 1763280000500,
+      "policy_scope_max": 100,
+      "expected_verdict": "REFUSES",
+      "expected_reason": "param-widening"
+    },
+    {
+      "name": "b3-stale-authority-at-settlement",
+      "note": "Tool and params bound, but authority_verified_at_ms falls outside the freshness window at settlement. Exercises the freshness-layer optional fields as a settlement-time MUST.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.send",
+      "action_type": "payment.send",
+      "effective_args": {
+        "amount": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763270000000,
+      "revocation_check_at_ms": 1763270000000,
+      "settlement_at_ms": 1763280000500,
+      "freshness_window_ms": 3600000,
+      "policy_scope_max": 100,
+      "expected_verdict": "REFUSES",
+      "expected_reason": "stale-authority"
+    },
+    {
+      "name": "b3-delegated-subject-in-scope",
+      "note": "Delegation chain A->B->C; agent_id in the preimage is C after full delegation resolution (preimage agent_id is the chain tail per -05 delegation-resolution section); C dispatches the approved tool within scope. Per -05 section on delegation resolution, BINDS.",
+      "authorized_tool": "payments.send",
+      "dispatched_tool": "payments.send",
+      "action_type": "payment.send",
+      "agent_id_preimage": "agent-C",
+      "delegation_chain": [
+        "agent-A",
+        "agent-B",
+        "agent-C"
+      ],
+      "effective_args": {
+        "amount": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "approved_params": {
+        "amount_max": 100,
+        "currency": "USD",
+        "to": "acct_7k"
+      },
+      "authority_verified_at_ms": 1763280000000,
+      "revocation_check_at_ms": 1763280000000,
+      "settlement_at_ms": 1763280000500,
+      "policy_scope_max": 100,
+      "expected_verdict": "BINDS",
+      "expected_reason": "delegation-resolved + tool-identity + params-bound + fresh"
+    }
+  ]
+}
