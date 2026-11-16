@@ -1,73 +1,141 @@
 #!/usr/bin/env python3
 """Correctover independent tool-binding verifier (dependency-free).
-Written from draft-etcheverry-action-ref-05 alone; intentionally does not
-read or call any other author-set implementation. Reproduces every expected
-verdict in correctover-tool-binding-v1-vectors.json.
 
-Note: b3-exact-tool-and-params carries a placeholder digest constant in this
-first cut; verify.py computes digests itself and reports the discrepancy
-openly (see README "known gaps"). Replacing the constant with the real
-SHA-256(JCS(effective_args)) is a one-line fix pending an RFC 8785
-dependency-free JCS implementation in this file.
+Written from draft-etcheverry-action-ref-05 alone; intentionally does not read
+or call any other author-set implementation. Reproduces every expected verdict
+in correctover-tool-binding-v1-vectors.json.
+
+Every anchor carries a real SHA-256(JCS(effective_args)) digest, so the digest
+comparison is live on all seven of them. For each record this verifier also
+prints what a digest-only pipeline would have concluded from the same bytes.
+That column is the point of the suite: on the five REFUSES anchors a digest-only
+pipeline sees a valid receipt and passes the record, while binding rejects it.
+
+Scope note: the JCS implementation here is exact for the ASCII-only preimages in
+this suite (sorted keys, no whitespace, minimal escaping). Byte-level RFC 8785
+conformance for non-ASCII inputs belongs to the three JCS comparison-semantics
+author-sets and is deliberately not duplicated here.
 """
-import json, hashlib, sys, os
+import json
+import hashlib
+import sys
+import os
 
 FRESHNESS_WINDOW_DEFAULT_MS = 3600000
 
-def verdict_for(a):
+
+def jcs(obj):
+    """RFC 8785 canonical JSON, exact for the ASCII-only preimages in this suite."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
+def digest_of(args):
+    return hashlib.sha256(jcs(args)).hexdigest()
+
+
+def digest_only_verdict(anchor):
+    """What a pipeline that only checks the receipt digest would conclude.
+
+    Returns None when the anchor asserts no digest: such a pipeline has nothing
+    to say about the record, which is itself a way to pass it.
+    """
+    declared = anchor.get("effective_args_digest")
+    if declared is None:
+        return None
+    return "BINDS" if declared == digest_of(anchor["effective_args"]) else "REFUSES"
+
+
+def verdict_for(anchor):
+    a = anchor
+
     # 1. label integrity: action_type is exact-match per the -05 preimage table
     approved_label = a.get("approved_action_type", a.get("action_type"))
     if a["action_type"] != approved_label:
         return ("REFUSES", "label-integrity")
-    # 2. tool identity
+
+    # 2. tool identity: dispatched tool must be the approved tool
     if a["dispatched_tool"] != a["authorized_tool"]:
         return ("REFUSES", "tool-identity")
-    # 3. params binding vs approved declaration
-    ap = a.get("approved_params")
-    if ap:
-        ea = a["effective_args"]
-        if ea.get("to") != ap.get("to") or ea.get("currency") != ap.get("currency"):
+
+    # 3. params binding against the approved declaration
+    approved = a.get("approved_params")
+    if approved:
+        dispatched = a["effective_args"]
+        if dispatched.get("to") != approved.get("to"):
             return ("REFUSES", "param-widening")
-        if a.get("policy_scope_max") is not None and ea.get("amount", 0) > ap.get("amount_max", a["policy_scope_max"]):
+        if dispatched.get("currency") != approved.get("currency"):
             return ("REFUSES", "param-widening")
-    # 4. freshness layer (optional fields, settlement-time check)
-    win = a.get("freshness_window_ms", FRESHNESS_WINDOW_DEFAULT_MS)
-    st = a.get("settlement_at_ms")
-    if st is not None and a.get("authority_verified_at_ms") is not None:
-        if st - a["authority_verified_at_ms"] > win:
-            return ("REFUSES", "stale-authority")
-    # 5. delegation resolution: agent_id must be the chain tail
+        # keys present in the dispatch but never approved: widening by addition
+        extra = set(dispatched) - set(approved) - {"amount"}
+        if extra:
+            return ("REFUSES", "param-widening")
+        # both ceilings bind, so the effective ceiling is the tighter one
+        ceiling = approved.get("amount_max")
+        scope = a.get("policy_scope_max")
+        if scope is not None:
+            ceiling = scope if ceiling is None else min(ceiling, scope)
+        if ceiling is not None and dispatched.get("amount", 0) > ceiling:
+            return ("REFUSES", "param-widening")
+
+    # 4. freshness at settlement: authority and revocation are both settlement-time MUSTs
+    window = a.get("freshness_window_ms", FRESHNESS_WINDOW_DEFAULT_MS)
+    settled = a.get("settlement_at_ms")
+    if settled is not None:
+        for field in ("authority_verified_at_ms", "revocation_check_at_ms"):
+            stamped = a.get(field)
+            if stamped is not None and settled - stamped > window:
+                return ("REFUSES", "stale-authority")
+
+    # 5. delegation resolution: the preimage agent_id must be the chain tail
     chain = a.get("delegation_chain")
     if chain and a.get("agent_id_preimage") != chain[-1]:
         return ("REFUSES", "delegation-unresolved")
-    # 6. integrity: recompute digest over effective_args (JCS approximation:
-    #    sorted-key compact JSON, adequate for these fixed ASCII cases)
-    if a.get("effective_args_digest") and not a["effective_args_digest"].startswith("e3b0c442"):
-        j = json.dumps(a["effective_args"], sort_keys=True, separators=(",", ":")).encode()
-        d = hashlib.sha256(j).hexdigest()
-        if d != a["effective_args_digest"]:
-            return ("REFUSES", "integrity")
-    return ("BINDS", "tool-identity + params-bound + fresh" if not chain else
-            "delegation-resolved + tool-identity + params-bound + fresh")
+
+    # 6. integrity last: recompute the digest over the dispatched args
+    declared = a.get("effective_args_digest")
+    if declared is not None and declared != digest_of(a["effective_args"]):
+        return ("REFUSES", "integrity")
+
+    reason = "tool-identity + params-bound + fresh"
+    if chain:
+        reason = "delegation-resolved + " + reason
+    return ("BINDS", reason)
+
 
 def main():
-    path = os.path.join(os.path.dirname(__file__), "correctover-tool-binding-v1-vectors.json")
-    suite = json.load(open(path, encoding="utf-8"))
-    agrees, seen_placeholder = 0, False
+    here = os.path.dirname(os.path.abspath(__file__))
+    suite = json.load(open(os.path.join(here, "correctover-tool-binding-v1-vectors.json"),
+                           encoding="utf-8"))
+
+    agree = 0
+    undecided = 0
     for anchor in suite["anchors"]:
         got = verdict_for(anchor)
-        exp = (anchor["expected_verdict"], anchor["expected_reason"])
-        ok = got == exp
-        agrees += ok
-        if anchor["name"] == "b3-exact-tool-and-params" and anchor["expected_verdict"] == "BINDS":
-            seen_placeholder = True
-        print(f"{'PASS' if ok else 'FAIL'}  {anchor['name']:38s} expected={exp[0]}/{exp[1]}  got={got[0]}/{got[1]}")
+        expected = (anchor["expected_verdict"], anchor["expected_reason"])
+        ok = got == expected
+        agree += ok
+
+        only = digest_only_verdict(anchor)
+        if only is not None and only != got[0]:
+            undecided += 1
+            marker = "  <- digest-only passes, binding refuses"
+        elif only is None:
+            marker = "  <- no digest asserted"
+        else:
+            marker = ""
+
+        print(f"{'PASS' if ok else 'FAIL'}  {anchor['name']:34s} "
+              f"expected={expected[0]}/{expected[1]}  "
+              f"got={got[0]}/{got[1]}  digest-only={only or 'n/a'}{marker}")
+
     total = len(suite["anchors"])
-    print(f"\n{agrees}/{total} verdicts agree. Zero-disagreement is the author-set requirement.")
-    if seen_placeholder:
-        print("NOTE: b3-exact-tool-and-params uses a placeholder digest constant; the BINDS path is "
-              "decided on tool/params/freshness, digest comparison is skipped for it (documented gap).")
-    return 0 if agrees == total else 1
+    print()
+    print(f"{agree}/{total} verdicts agree. Zero-disagreement is the author-set requirement.")
+    print(f"{undecided} of {total} anchors are decided by binding alone: a digest-only "
+          f"pipeline passes them and this verifier refuses them.")
+    return 0 if agree == total else 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -2,21 +2,26 @@
 
 Fourth author-set in the comparison-semantics series (after trail, agentavow, agentgraph).
 
-**Focus**: this author-set contributes what the JCS comparison-semantics suites deliberately do not cover — **runtime tool-binding cases that a digest-only pipeline cannot decide**. The preimage/anchor layer proves the record was not tampered with; these vectors decide whether the tool identity and parameter set behind the record still bind to the approved declaration at settlement time, including the freshness-layer optional fields (`policy_version` / `authority_verified_at_ms` / `revocation_check_at_ms`) used as a settlement-time MUST, and delegation-resolved subject binding per the -05 delegation-resolution section.
+**Focus**: this author-set contributes what the JCS comparison-semantics suites deliberately do not cover — **runtime tool-binding cases that a digest-only pipeline cannot decide**. The preimage/anchor layer proves the record was not tampered with; these vectors decide whether the tool identity and parameter set behind the record still bind to the approved declaration at settlement time, including the freshness-layer optional fields (`authority_verified_at_ms` / `revocation_check_at_ms`) used as a settlement-time MUST, and delegation-resolved subject binding per the -05 delegation-resolution section.
+
+## The claim, and how to falsify it
+
+The claim is not that these records are malformed. Every anchor carries a real `effective_args_digest` = SHA-256(JCS(`effective_args`)). On five of the seven, that digest verifies and a digest-only pipeline therefore **passes** the record; binding refuses it. `verify.py` prints both verdicts side by side for exactly this reason — the `digest-only=` column is the falsification handle. If a reviewer can make a digest-only pipeline reject any of those five, the suite is wrong about the case it claims to cover.
 
 ## Contents
-- `correctover-tool-binding-v1-vectors.json` — 6 fixed anchors, reason-classed (tool-identity / label-integrity / param-widening / stale-authority / delegation-unresolved)
+- `correctover-tool-binding-v1-vectors.json` — 7 fixed anchors, reason-classed (tool-identity / label-integrity / param-widening / stale-authority / delegation-unresolved), each with a real digest
 - `verify.py` — the independent verifier, dependency-free, written from -05 alone with no reference to the other author-set implementations
 
 ## Reproduce
 ```
 python3 conformance/correctover/verify.py
-# 6/6 verdicts agree. Zero-disagreement is the author-set requirement.
+# 7/7 verdicts agree. Zero-disagreement is the author-set requirement.
+# 5 of 7 anchors are decided by binding alone: a digest-only pipeline passes them and this verifier refuses them.
 ```
 
 ## Known gaps (declared, per house rule: no reproduction evidence = no finding)
-1. `b3-exact-tool-and-params` carries a placeholder digest constant; the BINDS path for it is decided on tool/params/freshness and digest comparison is skipped for that anchor. A dependency-free RFC 8785 canonicalizer inside verify.py is the one-line fix.
-2. JCS approximation in verify.py is sorted-key compact JSON — adequate for these fixed ASCII preimages, not a general RFC 8785 implementation. Byte-level conformance for non-ASCII inputs belongs to the three JCS comparison-semantics author-sets and is intentionally not duplicated here.
+1. The JCS implementation inside `verify.py` is `sorted keys + no whitespace + minimal escaping`, which is byte-exact for the fixed ASCII preimages here. It is not a general RFC 8785 implementation. Byte-level conformance for non-ASCII inputs belongs to the three JCS comparison-semantics author-sets and is intentionally not duplicated here.
+2. `approved_action_type` is a local extension, not a field defined by -05. It models the approved-declaration side of the label check; without it the label comparison has nothing to compare against, since -05 fixes `action_type` as a single preimage field and says nothing about how a relying party learns what was approved.
 3. A second independently written verifier (verifier-two) is in progress; until it lands, zero-disagreement is claimed within this single implementation only.
 
 ## Author
