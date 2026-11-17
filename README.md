@@ -1,26 +1,15 @@
-# draft-etcheverry-action-ref — conformance matrices for the `action_ref` Internet-Draft
+# conformance matrices for draft-etcheverry-action-ref
 
-Public conformance vectors and independent verification for [draft-etcheverry-action-ref-00](./draft-etcheverry-action-ref-00.txt) ("Action Reference: A Deterministic Identifier for Agent Actions", individual submission, June 2026).
+Three independent implementations, one identifier claim, committed digests. Runnable offline from the checkout.
 
-Our position: a deterministic correlation identifier for agent actions is the substrate every downstream verdict needs — who did what, to which target, under which grant. This repo makes the draft's identifier claim **checkable across independent implementations** rather than asserted.
-
-## Conformance matrices
-
-| Matrix | What it proves | Verifier |
+| Matrix | Claim being checked | Verifier |
 |---|---|---|
-| `conformance/trail/` | JCS comparison vectors for TrailRecord anchoring | `verify.mjs` |
-| `conformance/agentgraph/` | action_ref v1 vectors + JCS cross-check | `verify.mjs` |
+| `conformance/trail/` | TrailRecord anchoring produces identical `action_ref` under JCS | `verify.mjs` |
+| `conformance/agentgraph/` | action_ref v1 vectors + JCS cross-implementation comparison | `verify.mjs` |
 | `conformance/agentavow/` | agentavow JCS v1 vectors | `verify.py` |
 
-Every matrix is runnable from the checkout with no network access; expected digests are committed alongside the vectors.
+**For implementers picking up the draft** ([draft-etcheverry-action-ref-00.txt](./draft-etcheverry-action-ref-00.txt)): the fastest way to check your `action_ref` is canonicalization-stable is to point `verify.mjs`/`verify.py` at your own records — expected digests are committed next to the vectors, and disagreement is a bug report, not a failure. The JCS comparison matrices exist because two implementations disagreed on number formatting before they disagreed on anything else; the draft's canonicalization section is load-bearing.
 
-## Related Correctover work
+Draft by P. Etcheverry (Rama). Correctover maintains these conformance matrices and the post-execution layer that consumes the identifier ([argentum-core](https://github.com/DSHCorrectover/argentum-core), listed on the official MCP Registry; verdict layer: [correctover-recovery-admission](https://github.com/DSHCorrectover/correctover-recovery-admission)).
 
-- Post-execution accountability: [argentum-core](https://github.com/DSHCorrectover/argentum-core) (listed on the official MCP Registry)
-- Pre-execution verdict layer: [correctover-recovery-admission](https://github.com/DSHCorrectover/correctover-recovery-admission)
-
----
-
-**Commercial verification engagements** — post-migration authorization integrity assessment, court-ready dossier: [tiers & free sample](https://dshcorrectover.github.io/correctover-recovery-admission/services.html) · wangguigui@correctover.com
-
-*AI-assisted disclosure: this repository is maintained with AI assistance, reviewed by Guigui Wang.*
+*AI-assisted disclosure: maintained with AI assistance, reviewed by Guigui Wang.*
